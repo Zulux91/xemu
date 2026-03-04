@@ -23,7 +23,6 @@ static bool xemu_snapshots_dirty = true;
 static GLuint g_snapshot_display_tex = 0;
 static bool g_snapshot_display_flip = false;
 static SDL_atomic_t g_snapshot_pending = { 0 };
-static SDL_atomic_t g_fps_counter_enabled = { 0 };
 
 #define SNAPSHOT_PREVIEW_WIDTH  320
 #define SNAPSHOT_PREVIEW_HEIGHT 240
@@ -390,60 +389,8 @@ static struct {
     .cond = PTHREAD_COND_INITIALIZER,
 };
 
-static struct {
-    pthread_mutex_t lock;
-    uint64_t window_start_ms;
-    uint64_t last_frame_ms;
-    uint32_t frame_count;
-    float fps;
-} g_fps_state = {
-    .lock = PTHREAD_MUTEX_INITIALIZER,
-};
-
-static void set_fps_counter_enabled(bool enabled)
-{
-    SDL_AtomicSet(&g_fps_counter_enabled, enabled ? 1 : 0);
-
-    if (!enabled) {
-        pthread_mutex_lock(&g_fps_state.lock);
-        g_fps_state.window_start_ms = 0;
-        g_fps_state.last_frame_ms = 0;
-        g_fps_state.frame_count = 0;
-        g_fps_state.fps = 0.0f;
-        pthread_mutex_unlock(&g_fps_state.lock);
-    }
-}
-
-static void update_android_fps_counter(void)
-{
-    const uint64_t now_ms = (uint64_t)SDL_GetTicks64();
-
-    pthread_mutex_lock(&g_fps_state.lock);
-
-    if (g_fps_state.window_start_ms == 0) {
-        g_fps_state.window_start_ms = now_ms;
-    }
-
-    g_fps_state.last_frame_ms = now_ms;
-    g_fps_state.frame_count++;
-
-    const uint64_t elapsed_ms = now_ms - g_fps_state.window_start_ms;
-    if (elapsed_ms >= 500) {
-        g_fps_state.fps = ((float)g_fps_state.frame_count * 1000.0f) /
-                          (float)elapsed_ms;
-        g_fps_state.frame_count = 0;
-        g_fps_state.window_start_ms = now_ms;
-    }
-
-    pthread_mutex_unlock(&g_fps_state.lock);
-}
-
 void xemu_android_process_snapshot_request(void)
 {
-    if (SDL_AtomicGet(&g_fps_counter_enabled) != 0) {
-        update_android_fps_counter();
-    }
-
     if (SDL_AtomicGet(&g_snapshot_pending) == 0) {
         return;
     }
@@ -521,41 +468,4 @@ Java_com_izzy2lost_x1box_MainActivity_nativeLoadSnapshot(
 {
     (void)obj;
     return dispatch_snapshot(env, name, SNAP_LOAD);
-}
-
-JNIEXPORT jfloat JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeGetFps(
-        JNIEnv *env, jobject obj)
-{
-    if (SDL_AtomicGet(&g_fps_counter_enabled) == 0) {
-        return 0.0f;
-    }
-
-    float fps = 0.0f;
-    const uint64_t now_ms = (uint64_t)SDL_GetTicks64();
-    (void)env;
-    (void)obj;
-
-    pthread_mutex_lock(&g_fps_state.lock);
-    fps = g_fps_state.fps;
-    if (g_fps_state.last_frame_ms == 0 ||
-        (now_ms - g_fps_state.last_frame_ms) > 1500) {
-        fps = 0.0f;
-    }
-    pthread_mutex_unlock(&g_fps_state.lock);
-
-    if (fps < 0.0f) {
-        fps = 0.0f;
-    }
-
-    return (jfloat)fps;
-}
-
-JNIEXPORT void JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeSetFpsCounterEnabled(
-        JNIEnv *env, jobject obj, jboolean enabled)
-{
-    (void)env;
-    (void)obj;
-    set_fps_counter_enabled(enabled == JNI_TRUE);
 }
