@@ -42,3 +42,6 @@ replay_pid*.log
 *.txt
 .claude/settings.json
 android/key.properties
+BUGFIX_PLAN.md
+CLAUDE.md
+.claude/settings.local.json
