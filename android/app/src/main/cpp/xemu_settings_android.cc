@@ -67,7 +67,7 @@ static void xemu_settings_apply_defaults(void)
     g_config.input.keyboard_controller_scancode_map.rstick_down = 14;
     g_config.input.keyboard_controller_scancode_map.rtrigger = 18;
 
-    g_config.display.renderer = CONFIG_DISPLAY_RENDERER_VULKAN;
+    g_config.display.renderer = CONFIG_DISPLAY_RENDERER_OPENGL;
     g_config.display.filtering = CONFIG_DISPLAY_FILTERING_LINEAR;
     g_config.display.quality.surface_scale = 1;
     g_config.display.window.fullscreen_on_startup = false;

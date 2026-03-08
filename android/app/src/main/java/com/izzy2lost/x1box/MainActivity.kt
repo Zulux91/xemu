@@ -17,11 +17,13 @@ import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ListView
+import android.widget.RelativeLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.libsdl.app.SDLActivity
+import org.libsdl.app.SDLSurface
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -51,6 +53,15 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private var comboTriggered = false
   private var startupSnapshotSlot: Int? = null
   private var startupSnapshotLoadScheduled = false
+
+  override fun createSDLSurface(context: Context): SDLSurface {
+    return super.createSDLSurface(context).apply {
+      layoutParams = RelativeLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+      )
+    }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)

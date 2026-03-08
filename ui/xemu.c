@@ -304,9 +304,17 @@ void sdl2_window_resize(struct sdl2_console *scon)
         return;
     }
 
+#ifdef __ANDROID__
+    /* Keep the Android activity surface full-screen. The guest framebuffer
+     * size changes frequently (e.g. 640x480 boot surfaces), but shrinking the
+     * SDL window to match it makes the app render into a corner-sized window.
+     */
+    return;
+#else
     SDL_SetWindowSize(scon->real_window,
                       surface_width(scon->surface),
                       surface_height(scon->surface));
+#endif
 }
 
 static void sdl2_redraw(struct sdl2_console *scon)

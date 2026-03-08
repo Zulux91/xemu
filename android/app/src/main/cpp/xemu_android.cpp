@@ -717,7 +717,7 @@ struct EmulatorSettings {
   int frame_rate_limit = 60;          // 30 or 60
   int system_memory_mib = 64;         // 64 or 128
   std::string tcg_thread = "multi";   // "single" or "multi"
-  std::string renderer = "vulkan";    // "vulkan" or "opengl"
+  std::string renderer = "opengl";    // "vulkan" or "opengl"
   std::string filtering = "linear";   // "linear" or "nearest"
   bool use_dsp         = false;
   bool hrtf            = true;
