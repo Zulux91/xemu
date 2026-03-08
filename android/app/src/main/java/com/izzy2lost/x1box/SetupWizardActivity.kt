@@ -309,7 +309,9 @@ class SetupWizardActivity : AppCompatActivity() {
   }
 
   private fun isFileReady(path: String?): Boolean {
-    return path != null && File(path).isFile
+    if (path == null) return false
+    val f = File(path)
+    return f.isFile && f.length() > 0
   }
 
   private fun hasGamesFolderReady(): Boolean {
