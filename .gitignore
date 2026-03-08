@@ -45,3 +45,4 @@ android/key.properties
 BUGFIX_PLAN.md
 CLAUDE.md
 .claude/settings.local.json
+android/build-apk.bat
