@@ -901,6 +901,7 @@ static SetupFiles SyncSetupFiles() {
       LogInfo("MCPX ROM synced to app storage");
     } else {
       LogError("Failed to sync MCPX ROM");
+      out.mcpx = {};
     }
   }
   if (!flashPath.empty() && FileExists(flashPath)) {
@@ -912,6 +913,7 @@ static SetupFiles SyncSetupFiles() {
       LogInfo("Flash ROM synced to app storage");
     } else {
       LogError("Failed to sync flash ROM");
+      out.flash = {};
     }
   }
   if (!hddPath.empty() && FileExists(hddPath)) {
@@ -923,6 +925,7 @@ static SetupFiles SyncSetupFiles() {
       LogInfo("HDD image synced to app storage");
     } else {
       LogError("Failed to sync HDD image");
+      out.hdd = {};
     }
   }
 
@@ -939,6 +942,7 @@ static SetupFiles SyncSetupFiles() {
         LogInfo("DVD image synced to app storage");
       } else {
         LogError("Failed to sync DVD image");
+        out.dvd = {};
       }
     }
   }
@@ -1071,6 +1075,29 @@ extern "C" int SDL_main(int argc, char* argv[]) {
   LoadGameControllerMappingsFromAssets();
 
   SetupFiles setup = SyncSetupFiles();
+
+  {
+    const char* missing = nullptr;
+    if (setup.mcpx.empty() || !FileExists(setup.mcpx)) {
+      missing = "MCPX Boot ROM is missing or could not be accessed.\n"
+                "Please re-run the setup wizard and re-select your MCPX file.";
+    } else if (setup.flash.empty() || !FileExists(setup.flash)) {
+      missing = "Flash ROM is missing or could not be accessed.\n"
+                "Please re-run the setup wizard and re-select your Flash file.";
+    } else if (setup.hdd.empty() || !FileExists(setup.hdd)) {
+      missing = "HDD image is missing or could not be accessed.\n"
+                "Please re-run the setup wizard and re-select your HDD image.";
+    }
+    if (missing) {
+      LogError(missing);
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                               "X1 BOX — Missing System File",
+                               missing,
+                               nullptr);
+      SDL_Quit();
+      return 1;
+    }
+  }
 
   // If the user explicitly chose an audio driver in Settings, override the
   // hint we set at startup.  Audio is not initialized until qemu_init() so
