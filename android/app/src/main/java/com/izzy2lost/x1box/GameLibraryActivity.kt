@@ -1091,7 +1091,7 @@ class GameLibraryActivity : AppCompatActivity() {
       .putString("dvdUri", game.uri.toString())
       .remove("dvdPath")
       .putBoolean("skip_game_picker", false)
-      .apply()
+      .commit() 
 
     startActivity(Intent(this, MainActivity::class.java))
     finish()
