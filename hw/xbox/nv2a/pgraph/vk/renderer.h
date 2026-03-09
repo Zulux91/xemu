@@ -55,7 +55,8 @@ typedef struct MemorySyncRequirement {
 typedef struct RenderPassState {
     VkFormat color_format;
     VkFormat zeta_format;
-    bool clear; /* attachments are being cleared; use DONT_CARE load ops */
+    bool clear;       /* attachments are being cleared; use DONT_CARE load ops */
+    bool depth_write; /* depth/stencil writes enabled; use STORE when true */
 } RenderPassState;
 
 typedef struct RenderPass {
@@ -329,6 +330,7 @@ typedef struct PGRAPHVkState {
     bool debug_utils_extension_enabled;
     bool custom_border_color_extension_enabled;
     bool memory_budget_extension_enabled;
+    bool load_store_op_none_enabled;
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceFeatures enabled_physical_device_features;

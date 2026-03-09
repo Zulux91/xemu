@@ -302,6 +302,9 @@ static void init_render_pass_state(PGRAPHState *pg, RenderPassState *state)
     state->zeta_format = r->zeta_binding ? r->zeta_binding->host_fmt.vk_format :
                                            VK_FORMAT_UNDEFINED;
     state->clear = pg->clearing;
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    state->depth_write = !!(control_0 & (NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
+                                         NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE));
 }
 
 static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
@@ -321,6 +324,14 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
         state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
     VkAttachmentLoadOp depth_load_op =
         state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+
+    /* When depth/stencil writes are disabled, use STORE_OP_NONE so the driver
+     * knows the tile cache content is unmodified and skips the VRAM writeback.
+     * Falls back to STORE_OP_STORE if the extension is unavailable. */
+    VkAttachmentStoreOp depth_store_op =
+        (!state->depth_write && r->load_store_op_none_enabled)
+            ? VK_ATTACHMENT_STORE_OP_NONE
+            : VK_ATTACHMENT_STORE_OP_STORE;
 
     VkAttachmentReference color_reference;
     if (color) {
@@ -347,9 +358,9 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
             .format = state->zeta_format,
             .samples = VK_SAMPLE_COUNT_1_BIT,
             .loadOp = depth_load_op,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .storeOp = depth_store_op,
             .stencilLoadOp = depth_load_op,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .stencilStoreOp = depth_store_op,
             .initialLayout = state->clear ? VK_IMAGE_LAYOUT_UNDEFINED :
                                             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,

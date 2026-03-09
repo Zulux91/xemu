@@ -365,6 +365,10 @@ static void add_optional_device_extension_names(
     r->memory_budget_extension_enabled = add_extension_if_available(
         available_extensions, enabled_extension_names,
         VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
+    r->load_store_op_none_enabled = add_extension_if_available(
+        available_extensions, enabled_extension_names,
+        VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME);
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)
