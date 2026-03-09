@@ -55,7 +55,8 @@ typedef struct MemorySyncRequirement {
 typedef struct RenderPassState {
     VkFormat color_format;
     VkFormat zeta_format;
-    bool clear;       /* attachments are being cleared; use DONT_CARE load ops */
+    bool clear;       /* color attachment being cleared; use DONT_CARE color load op */
+    bool zeta_clear;  /* zeta attachment being cleared; use DONT_CARE depth load op */
     bool depth_write; /* depth/stencil writes enabled; use STORE when true */
 } RenderPassState;
 

@@ -301,7 +301,14 @@ static void init_render_pass_state(PGRAPHState *pg, RenderPassState *state)
                               VK_FORMAT_UNDEFINED;
     state->zeta_format = r->zeta_binding ? r->zeta_binding->host_fmt.vk_format :
                                            VK_FORMAT_UNDEFINED;
-    state->clear = pg->clearing;
+    if (pg->clearing) {
+        state->clear = !!(r->clear_parameter & NV097_CLEAR_SURFACE_COLOR);
+        state->zeta_clear = !!(r->clear_parameter &
+                                (NV097_CLEAR_SURFACE_Z | NV097_CLEAR_SURFACE_STENCIL));
+    } else {
+        state->clear = false;
+        state->zeta_clear = false;
+    }
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     state->depth_write = !!(control_0 & (NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
                                          NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE));
@@ -319,17 +326,20 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
 
     /* On tile-based mobile GPUs (Mali, Adreno), LOAD_OP_DONT_CARE avoids
      * reading the attachment from VRAM at the start of the render pass.
-     * When clearing, old content is irrelevant so we can always discard it. */
+     * Use per-attachment flags so a color-only clear does not discard valid
+     * depth data and a depth-only clear does not discard valid color data. */
     VkAttachmentLoadOp color_load_op =
         state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
     VkAttachmentLoadOp depth_load_op =
-        state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+        state->zeta_clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
 
     /* When depth/stencil writes are disabled, use STORE_OP_NONE so the driver
      * knows the tile cache content is unmodified and skips the VRAM writeback.
+     * Do not use STORE_OP_NONE when clearing: the clear values written into
+     * tile memory must be flushed to VRAM so subsequent passes can reload them.
      * Falls back to STORE_OP_STORE if the extension is unavailable. */
     VkAttachmentStoreOp depth_store_op =
-        (!state->depth_write && r->load_store_op_none_enabled)
+        (!state->depth_write && !state->zeta_clear && r->load_store_op_none_enabled)
             ? VK_ATTACHMENT_STORE_OP_NONE
             : VK_ATTACHMENT_STORE_OP_STORE;
 
@@ -361,8 +371,8 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
             .storeOp = depth_store_op,
             .stencilLoadOp = depth_load_op,
             .stencilStoreOp = depth_store_op,
-            .initialLayout = state->clear ? VK_IMAGE_LAYOUT_UNDEFINED :
-                                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .initialLayout = state->zeta_clear ? VK_IMAGE_LAYOUT_UNDEFINED :
+                                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
         depth_reference = (VkAttachmentReference){
