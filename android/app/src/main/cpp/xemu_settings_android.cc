@@ -87,7 +87,7 @@ static void xemu_settings_apply_defaults(void)
     g_config.display.ui.auto_scale = true;
     g_config.display.setup_nvidia_profile = true;
 
-    g_config.audio.vp.num_workers = 0;
+    g_config.audio.vp.num_workers = 2;
     g_config.audio.use_dsp = false;
     g_config.audio.hrtf = true;
     g_config.audio.volume_limit = 1.0;
@@ -211,7 +211,7 @@ bool xemu_settings_load(void)
     error_msg.clear();
     setenv("XEMU_ANDROID_TCG_TUNING", "1", 1);
     setenv("XEMU_ANDROID_TCG_THREAD", "multi", 1);
-    setenv("XEMU_ANDROID_TCG_TB_SIZE", "128", 1);
+    setenv("XEMU_ANDROID_TCG_TB_SIZE", "512", 1);
     setenv("XEMU_ANDROID_TARGET_FPS", "60", 1);
 
     const char *path = xemu_settings_get_path();

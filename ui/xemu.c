@@ -1355,7 +1355,7 @@ void xemu_android_display_loop(void)
     }
 #ifdef __ANDROID__
     xemu_android_refresh_frame_limit_from_env();
-    SDL_GL_SetSwapInterval(1);
+    SDL_GL_SetSwapInterval(0);
     xemu_hud_init(m_window, m_context);
 #endif
     tcg_register_init_ctx();
