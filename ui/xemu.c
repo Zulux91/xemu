@@ -1529,6 +1529,19 @@ void sdl2_gl_switch(DisplayChangeListener *dcl,
 
 float fps = 1.0;
 
+#ifdef __ANDROID__
+/* FPS value published to the Android UI layer. Written by the render thread
+ * via qatomic_set; read lock-free by the JNI polling function on the UI
+ * thread. Using an atomic int avoids the mutex contention that made the
+ * earlier FPS counter implementation problematic. */
+static int g_android_fps_published;
+
+int xemu_android_get_fps(void)
+{
+    return qatomic_read(&g_android_fps_published);
+}
+#endif
+
 static void update_fps(void)
 {
     static int64_t last_update = 0;
@@ -1540,6 +1553,9 @@ static void update_fps(void)
     if (fabs(avg-ms) > 0.25*avg) avg = ms;
     else avg = avg*(1.0-r)+ms*r;
     fps = 1000.0/avg;
+#ifdef __ANDROID__
+    qatomic_set(&g_android_fps_published, (int)fps);
+#endif
 }
 
 void sdl2_gl_refresh(DisplayChangeListener *dcl)

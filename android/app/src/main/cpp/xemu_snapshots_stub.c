@@ -469,3 +469,12 @@ Java_com_izzy2lost_x1box_MainActivity_nativeLoadSnapshot(
     (void)obj;
     return dispatch_snapshot(env, name, SNAP_LOAD);
 }
+
+extern int xemu_android_get_fps(void);
+
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_x1box_MainActivity_nativeGetFps(JNIEnv *env, jobject obj)
+{
+    (void)env; (void)obj;
+    return (jint)xemu_android_get_fps();
+}

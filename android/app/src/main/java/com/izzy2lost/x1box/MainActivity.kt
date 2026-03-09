@@ -3,11 +3,16 @@ package com.izzy2lost.x1box
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Typeface
 import android.hardware.input.InputManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
@@ -36,6 +41,8 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
     private const val SNAPSHOT_PREVIEW_HEADER_SIZE = 12
     private const val TOTAL_SNAPSHOT_SLOTS = 10
     private const val TAG = "MainActivity"
+    private const val PREF_SHOW_FPS = "setting_show_fps"
+    private const val FPS_POLL_INTERVAL_MS = 500L
   }
 
   private data class SnapshotSlotPreview(
@@ -57,6 +64,15 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private var startupSnapshotSlot: Int? = null
   private var startupSnapshotLoadScheduled = false
 
+  private var fpsCounterView: TextView? = null
+  private val fpsHandler = Handler(Looper.getMainLooper())
+  private val fpsRunnable: Runnable = object : Runnable {
+    override fun run() {
+      fpsCounterView?.text = "${nativeGetFps()} FPS"
+      fpsHandler.postDelayed(this, FPS_POLL_INTERVAL_MS)
+    }
+  }
+
   override fun createSDLSurface(context: Context): SDLSurface {
     return super.createSDLSurface(context).apply {
       layoutParams = RelativeLayout.LayoutParams(
@@ -75,6 +91,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
       startupSnapshotSlot = requestedSlot
     }
     setupOnScreenController()
+    setupFpsCounter()
     setupControllerDetection()
     hideSystemUI()
   }
@@ -162,7 +179,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
     super.onResume()
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     mLayout?.keepScreenOn = true
-    
+
     // Register virtual controller after SDL is initialized
     // Use a delay to ensure SDL is fully ready
     mLayout?.postDelayed({
@@ -170,6 +187,12 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
     }, 1000)
 
     scheduleStartupSnapshotLoadIfRequested()
+    if (isFpsCounterEnabled()) startFpsUpdates()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    stopFpsUpdates()
   }
 
   private fun scheduleStartupSnapshotLoadIfRequested() {
@@ -280,6 +303,8 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   override fun onDestroy() {
     Log.i(TAG, "onDestroy()")
+    stopFpsUpdates()
+    fpsCounterView = null
     inGameMenuDialog?.dismiss()
     inGameMenuDialog = null
 
@@ -380,8 +405,49 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
       ((source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)
   }
 
+  private fun isFpsCounterEnabled(): Boolean =
+    getSharedPreferences("x1box_prefs", MODE_PRIVATE).getBoolean(PREF_SHOW_FPS, false)
+
+  private fun setupFpsCounter() {
+    val tv = TextView(this).apply {
+      text = "0 FPS"
+      setTextColor(Color.WHITE)
+      setShadowLayer(3f, 1f, 1f, Color.BLACK)
+      typeface = Typeface.MONOSPACE
+      textSize = 14f
+      setPadding(8, 4, 8, 4)
+      visibility = View.GONE
+    }
+    val params = FrameLayout.LayoutParams(
+      FrameLayout.LayoutParams.WRAP_CONTENT,
+      FrameLayout.LayoutParams.WRAP_CONTENT
+    ).apply {
+      gravity = Gravity.TOP or Gravity.END
+      topMargin = 8
+      marginEnd = 8
+    }
+    mLayout?.addView(tv, params)
+    fpsCounterView = tv
+    if (isFpsCounterEnabled()) {
+      tv.visibility = View.VISIBLE
+      startFpsUpdates()
+    }
+  }
+
+  private fun startFpsUpdates() {
+    fpsCounterView?.visibility = View.VISIBLE
+    fpsHandler.removeCallbacks(fpsRunnable)
+    fpsHandler.post(fpsRunnable)
+  }
+
+  private fun stopFpsUpdates() {
+    fpsHandler.removeCallbacks(fpsRunnable)
+    fpsCounterView?.visibility = View.GONE
+  }
+
   private external fun nativeSaveSnapshot(name: String): Boolean
   private external fun nativeLoadSnapshot(name: String): Boolean
+  private external fun nativeGetFps(): Int
 
   private fun slotName(slot: Int) = "android_slot_$slot"
 
