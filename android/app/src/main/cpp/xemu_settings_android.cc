@@ -87,7 +87,7 @@ static void xemu_settings_apply_defaults(void)
     g_config.display.ui.auto_scale = true;
     g_config.display.setup_nvidia_profile = true;
 
-    g_config.audio.vp.num_workers = 2;
+    g_config.audio.vp.num_workers = 0; /* 0 = auto-detect based on CPU count */
     g_config.audio.use_dsp = false;
     g_config.audio.hrtf = true;
     g_config.audio.volume_limit = 1.0;
