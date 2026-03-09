@@ -42,7 +42,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
     private const val TOTAL_SNAPSHOT_SLOTS = 10
     private const val TAG = "MainActivity"
     private const val PREF_SHOW_FPS = "setting_show_fps"
-    private const val FPS_POLL_INTERVAL_MS = 1000L
+    private const val FPS_POLL_INTERVAL_MS = 500L
   }
 
   private data class SnapshotSlotPreview(
