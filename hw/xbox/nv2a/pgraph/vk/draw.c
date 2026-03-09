@@ -301,6 +301,7 @@ static void init_render_pass_state(PGRAPHState *pg, RenderPassState *state)
                               VK_FORMAT_UNDEFINED;
     state->zeta_format = r->zeta_binding ? r->zeta_binding->host_fmt.vk_format :
                                            VK_FORMAT_UNDEFINED;
+    state->clear = pg->clearing;
 }
 
 static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
@@ -313,16 +314,25 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
     bool color = state->color_format != VK_FORMAT_UNDEFINED;
     bool zeta = state->zeta_format != VK_FORMAT_UNDEFINED;
 
+    /* On tile-based mobile GPUs (Mali, Adreno), LOAD_OP_DONT_CARE avoids
+     * reading the attachment from VRAM at the start of the render pass.
+     * When clearing, old content is irrelevant so we can always discard it. */
+    VkAttachmentLoadOp color_load_op =
+        state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentLoadOp depth_load_op =
+        state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+
     VkAttachmentReference color_reference;
     if (color) {
         attachments[num_attachments] = (VkAttachmentDescription){
             .format = state->color_format,
             .samples = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+            .loadOp = color_load_op,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
             .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
             .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .initialLayout = state->clear ? VK_IMAGE_LAYOUT_UNDEFINED :
+                                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         };
         color_reference = (VkAttachmentReference){
@@ -336,11 +346,12 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
         attachments[num_attachments] = (VkAttachmentDescription){
             .format = state->zeta_format,
             .samples = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+            .loadOp = depth_load_op,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+            .stencilLoadOp = depth_load_op,
             .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .initialLayout = state->clear ? VK_IMAGE_LAYOUT_UNDEFINED :
+                                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
         depth_reference = (VkAttachmentReference){
