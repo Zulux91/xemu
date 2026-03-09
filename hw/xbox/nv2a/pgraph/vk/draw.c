@@ -1458,6 +1458,71 @@ void pgraph_vk_end_nondraw_commands(PGRAPHState *pg, VkCommandBuffer cmd)
 // buffer. For other reasons though (like descriptor set amount, surface
 // changes, etc) we do flush often.
 
+/*
+ * Check whether the currently open render pass (a full-surface LOAD_OP_CLEAR
+ * pass) is Vulkan-compatible with the draw pipeline's LOAD_OP_LOAD pass.
+ *
+ * Per the Vulkan spec, two render passes are compatible when they use the same
+ * attachment formats and sample counts; load/store ops and image layouts do
+ * not affect compatibility. This means a pipeline created with a LOAD_OP_LOAD
+ * render pass can be used inside a LOAD_OP_CLEAR render pass of the same
+ * format, allowing the clear and the first draw to share a single render pass
+ * and avoid the DRAM round-trip that would otherwise occur on TBDR GPUs
+ * (Adreno, Mali) between vkCmdEndRenderPass and vkCmdBeginRenderPass.
+ */
+static bool render_passes_clear_compatible(PGRAPHVkState *r,
+                                           VkRenderPass draw_pass)
+{
+    if (!r->in_render_pass || r->render_pass == draw_pass) {
+        return false;
+    }
+
+    /* Find the state of the currently active render pass */
+    RenderPassState *cur_state = NULL;
+    for (int i = 0; i < r->render_passes->len; i++) {
+        RenderPass *p = &g_array_index(r->render_passes, RenderPass, i);
+        if (p->render_pass == r->render_pass) {
+            cur_state = &p->state;
+            break;
+        }
+    }
+    if (!cur_state) {
+        return false;
+    }
+
+    /* The current pass must be a full-surface LOAD_OP_CLEAR pass */
+    if (!cur_state->color_load_clear && !cur_state->zeta_load_clear) {
+        return false;
+    }
+
+    /* Find the state of the draw pipeline's target render pass */
+    RenderPassState *draw_state = NULL;
+    for (int i = 0; i < r->render_passes->len; i++) {
+        RenderPass *p = &g_array_index(r->render_passes, RenderPass, i);
+        if (p->render_pass == draw_pass) {
+            draw_state = &p->state;
+            break;
+        }
+    }
+    if (!draw_state) {
+        return false;
+    }
+
+    /* Attachment formats must match for Vulkan compatibility */
+    if (cur_state->color_format != draw_state->color_format ||
+        cur_state->zeta_format  != draw_state->zeta_format) {
+        return false;
+    }
+
+    /* The draw pass must be a plain LOAD_OP_LOAD pass (not itself a clear) */
+    if (draw_state->clear || draw_state->zeta_clear ||
+        draw_state->color_load_clear || draw_state->zeta_load_clear) {
+        return false;
+    }
+
+    return true;
+}
+
 static void begin_pre_draw(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -1473,6 +1538,19 @@ static void begin_pre_draw(PGRAPHState *pg)
     }
 
     bool render_pass_dirty = r->pipeline_binding->render_pass != r->render_pass;
+
+    if (!r->framebuffer_dirty && render_pass_dirty &&
+        render_passes_clear_compatible(r, r->pipeline_binding->render_pass)) {
+        /*
+         * The open LOAD_OP_CLEAR render pass is Vulkan-compatible with this
+         * draw pipeline's LOAD_OP_LOAD pass (same attachment formats). Update
+         * the tracked render pass handle and continue inside the same render
+         * pass to merge the clear and the first draw into a single Vulkan
+         * render pass, eliminating a DRAM round-trip on TBDR GPUs.
+         */
+        r->render_pass = r->pipeline_binding->render_pass;
+        render_pass_dirty = false;
+    }
 
     if (r->framebuffer_dirty || render_pass_dirty) {
         pgraph_vk_ensure_not_in_render_pass(pg);
@@ -1603,7 +1681,14 @@ static void end_draw(PGRAPHState *pg)
     assert(r->in_command_buffer);
     assert(r->in_render_pass);
 
-    if (pg->clearing) {
+    if (pg->clearing && !r->clear_color_full && !r->clear_zeta_full) {
+        /*
+         * Partial or non-LOAD_OP_CLEAR clears must end the render pass
+         * immediately. Full-surface LOAD_OP_CLEAR clears keep it open so the
+         * next draw can continue inside the same render pass (see
+         * render_passes_clear_compatible), avoiding a DRAM round-trip on
+         * TBDR GPUs (Adreno, Mali).
+         */
         end_render_pass(r);
     }
 
