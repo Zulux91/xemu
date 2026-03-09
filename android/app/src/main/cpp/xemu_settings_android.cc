@@ -210,7 +210,7 @@ bool xemu_settings_load(void)
     xemu_settings_apply_defaults();
     error_msg.clear();
     setenv("XEMU_ANDROID_TCG_TUNING", "1", 1);
-    setenv("XEMU_ANDROID_TCG_THREAD", "multi", 1);
+    setenv("XEMU_ANDROID_TCG_THREAD", "single", 1);
     setenv("XEMU_ANDROID_TCG_TB_SIZE", "512", 1);
     setenv("XEMU_ANDROID_TARGET_FPS", "60", 1);
 
