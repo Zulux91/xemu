@@ -305,9 +305,13 @@ static void init_render_pass_state(PGRAPHState *pg, RenderPassState *state)
         state->clear = !!(r->clear_parameter & NV097_CLEAR_SURFACE_COLOR);
         state->zeta_clear = !!(r->clear_parameter &
                                 (NV097_CLEAR_SURFACE_Z | NV097_CLEAR_SURFACE_STENCIL));
+        state->color_load_clear = r->clear_color_full;
+        state->zeta_load_clear  = r->clear_zeta_full;
     } else {
         state->clear = false;
         state->zeta_clear = false;
+        state->color_load_clear = false;
+        state->zeta_load_clear  = false;
     }
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     state->depth_write = !!(control_0 & (NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
@@ -327,11 +331,18 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
     /* On tile-based mobile GPUs (Mali, Adreno), LOAD_OP_DONT_CARE avoids
      * reading the attachment from VRAM at the start of the render pass.
      * Use per-attachment flags so a color-only clear does not discard valid
-     * depth data and a depth-only clear does not discard valid color data. */
+     * depth data and a depth-only clear does not discard valid color data.
+     * LOAD_OP_CLEAR initializes tile memory with the clear value at render
+     * pass begin — a dedicated hardware path on TBDR GPUs that eliminates
+     * the need for a separate vkCmdClearAttachments draw. */
     VkAttachmentLoadOp color_load_op =
-        state->clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+        state->color_load_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR :
+        state->clear            ? VK_ATTACHMENT_LOAD_OP_DONT_CARE :
+                                  VK_ATTACHMENT_LOAD_OP_LOAD;
     VkAttachmentLoadOp depth_load_op =
-        state->zeta_clear ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+        state->zeta_load_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR :
+        state->zeta_clear      ? VK_ATTACHMENT_LOAD_OP_DONT_CARE :
+                                 VK_ATTACHMENT_LOAD_OP_LOAD;
 
     /* When depth/stencil writes are disabled, use STORE_OP_NONE so the driver
      * knows the tile cache content is unmodified and skips the VRAM writeback.
@@ -352,8 +363,9 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
             .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
             .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout = state->clear ? VK_IMAGE_LAYOUT_UNDEFINED :
-                                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .initialLayout = (state->color_load_clear || state->clear) ?
+                                 VK_IMAGE_LAYOUT_UNDEFINED :
+                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         };
         color_reference = (VkAttachmentReference){
@@ -371,8 +383,9 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
             .storeOp = depth_store_op,
             .stencilLoadOp = depth_load_op,
             .stencilStoreOp = depth_store_op,
-            .initialLayout = state->zeta_clear ? VK_IMAGE_LAYOUT_UNDEFINED :
-                                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .initialLayout = (state->zeta_load_clear || state->zeta_clear) ?
+                                 VK_IMAGE_LAYOUT_UNDEFINED :
+                                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         };
         depth_reference = (VkAttachmentReference){
@@ -1274,8 +1287,8 @@ static void begin_render_pass(PGRAPHState *pg)
         .framebuffer = r->framebuffers[r->framebuffer_index - 1],
         .renderArea.extent.width = vp_width,
         .renderArea.extent.height = vp_height,
-        .clearValueCount = 0,
-        .pClearValues = NULL,
+        .clearValueCount = r->rp_clear_value_count,
+        .pClearValues = r->rp_clear_value_count > 0 ? r->rp_clear_values : NULL,
     };
     vkCmdBeginRenderPass(r->command_buffer, &render_pass_begin_info,
                          VK_SUBPASS_CONTENTS_INLINE);
@@ -1770,12 +1783,6 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
                          ymax, write_color ? " color" : "",
                          write_zeta ? " zeta" : "");
 
-    begin_pre_draw(pg);
-    pgraph_vk_begin_debug_marker(r, r->command_buffer,
-        RGBA_BLUE, "Clear %08" HWADDR_PRIx,
-        binding->vram_addr);
-    begin_draw(pg);
-
     // FIXME: What does hardware do when min >= max?
     // FIXME: What does hardware do when min >= surface size?
     xmin = MIN(xmin, binding->width - 1);
@@ -1785,6 +1792,53 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 
     unsigned int scissor_width = MAX(0, xmax - xmin + 1);
     unsigned int scissor_height = MAX(0, ymax - ymin + 1);
+
+    /* Detect full-surface clears eligible for LOAD_OP_CLEAR.
+     * On tile-based GPUs (Adreno, Mali) LOAD_OP_CLEAR initializes tile
+     * memory during render pass begin via dedicated hardware, eliminating
+     * the vkCmdClearAttachments draw call entirely. */
+    bool is_full_surface = (xmin == 0 && ymin == 0 &&
+                            scissor_width  == binding->width &&
+                            scissor_height == binding->height);
+
+    bool clear_all_color_channels =
+        (parameter & NV097_CLEAR_SURFACE_COLOR) ==
+        (NV097_CLEAR_SURFACE_R | NV097_CLEAR_SURFACE_G |
+         NV097_CLEAR_SURFACE_B | NV097_CLEAR_SURFACE_A);
+
+    bool has_stencil = r->zeta_binding &&
+        (r->zeta_binding->host_fmt.aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
+    bool clearing_full_zeta_aspects =
+        (parameter & NV097_CLEAR_SURFACE_Z) &&
+        (!has_stencil || (parameter & NV097_CLEAR_SURFACE_STENCIL));
+
+    r->clear_color_full = is_full_surface && write_color &&
+                          r->color_binding && clear_all_color_channels;
+    r->clear_zeta_full  = is_full_surface && write_zeta &&
+                          r->zeta_binding && clearing_full_zeta_aspects;
+
+    r->rp_clear_value_count = 0;
+    memset(r->rp_clear_values, 0, sizeof(r->rp_clear_values));
+
+    if (r->clear_color_full) {
+        pgraph_get_clear_color(pg, r->rp_clear_values[0].color.float32);
+        r->rp_clear_value_count = 1;
+    }
+    if (r->clear_zeta_full) {
+        float depth_val = 1.0f;
+        int stencil_val = 0;
+        pgraph_get_clear_depth_stencil_value(pg, &depth_val, &stencil_val);
+        int zeta_idx = r->color_binding ? 1 : 0;
+        r->rp_clear_values[zeta_idx].depthStencil.depth   = depth_val;
+        r->rp_clear_values[zeta_idx].depthStencil.stencil = (uint32_t)stencil_val;
+        r->rp_clear_value_count = MAX(r->rp_clear_value_count, zeta_idx + 1);
+    }
+
+    begin_pre_draw(pg);
+    pgraph_vk_begin_debug_marker(r, r->command_buffer,
+        RGBA_BLUE, "Clear %08" HWADDR_PRIx,
+        binding->vram_addr);
+    begin_draw(pg);
 
     pgraph_apply_anti_aliasing_factor(pg, &xmin, &ymin);
     pgraph_apply_anti_aliasing_factor(pg, &scissor_width, &scissor_height);
@@ -1804,12 +1858,7 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     int num_attachments = 0;
     VkClearAttachment attachments[2];
 
-    if (write_color && r->color_binding) {
-        const bool clear_all_color_channels =
-            (parameter & NV097_CLEAR_SURFACE_COLOR) ==
-            (NV097_CLEAR_SURFACE_R | NV097_CLEAR_SURFACE_G |
-             NV097_CLEAR_SURFACE_B | NV097_CLEAR_SURFACE_A);
-
+    if (write_color && r->color_binding && !r->clear_color_full) {
         if (clear_all_color_channels) {
             attachments[num_attachments] = (VkClearAttachment){
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1827,7 +1876,7 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
         }
     }
 
-    if (write_zeta && r->zeta_binding) {
+    if (write_zeta && r->zeta_binding && !r->clear_zeta_full) {
         int stencil_value = 0;
         float depth_value = 1.0;
         pgraph_get_clear_depth_stencil_value(pg, &depth_value, &stencil_value);
@@ -1856,6 +1905,9 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     pgraph_vk_end_debug_marker(r, r->command_buffer);
 
     pg->clearing = false;
+    r->clear_color_full = false;
+    r->clear_zeta_full  = false;
+    r->rp_clear_value_count = 0;
 
     pgraph_vk_set_surface_dirty(pg, write_color, write_zeta);
 

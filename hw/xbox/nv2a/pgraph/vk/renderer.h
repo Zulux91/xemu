@@ -55,9 +55,11 @@ typedef struct MemorySyncRequirement {
 typedef struct RenderPassState {
     VkFormat color_format;
     VkFormat zeta_format;
-    bool clear;       /* color attachment being cleared; use DONT_CARE color load op */
-    bool zeta_clear;  /* zeta attachment being cleared; use DONT_CARE depth load op */
-    bool depth_write; /* depth/stencil writes enabled; use STORE when true */
+    bool clear;            /* color attachment being cleared; use DONT_CARE color load op */
+    bool zeta_clear;       /* zeta attachment being cleared; use DONT_CARE depth load op */
+    bool color_load_clear; /* full-surface all-channel color clear; use LOAD_OP_CLEAR */
+    bool zeta_load_clear;  /* full-surface zeta clear; use LOAD_OP_CLEAR */
+    bool depth_write;      /* depth/stencil writes enabled; use STORE when true */
 } RenderPassState;
 
 typedef struct RenderPass {
@@ -431,6 +433,10 @@ typedef struct PGRAPHVkState {
     SurfaceFormatInfo kelvin_surface_zeta_vk_map[3];
 
     uint32_t clear_parameter;
+    bool clear_color_full;   /* full-surface all-channel color clear; use LOAD_OP_CLEAR */
+    bool clear_zeta_full;    /* full-surface zeta clear; use LOAD_OP_CLEAR */
+    VkClearValue rp_clear_values[2]; /* indexed by attachment order (color=0, zeta=0/1) */
+    int rp_clear_value_count;
 
     PGRAPHVkDisplayState display;
     PGRAPHVkComputeState compute;
