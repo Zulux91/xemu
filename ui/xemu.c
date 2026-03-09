@@ -1550,7 +1550,7 @@ static void update_fps(void)
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     float ms = ((float)(now-last_update)/1000000.0);
     last_update = now;
-    if (fabs(avg-ms) > 0.25*avg) avg = ms;
+    if (ms > avg * 1.5f) avg = ms; /* snap down on sudden slowdown, not up */
     else avg = avg*(1.0-r)+ms*r;
     fps = 1000.0/avg;
 #ifdef __ANDROID__
