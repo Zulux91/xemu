@@ -1534,11 +1534,36 @@ float fps = 1.0;
  * via qatomic_set; read lock-free by the JNI polling function on the UI
  * thread. Using an atomic int avoids the mutex contention that made the
  * earlier FPS counter implementation problematic. */
-static int g_android_fps_published;
+static int     g_android_fps_published;
+static int64_t g_fps_window_start_ns;
+static int     g_fps_frame_count;
 
 int xemu_android_get_fps(void)
 {
     return qatomic_read(&g_android_fps_published);
+}
+
+/*
+ * Count frames inside a fixed 1-second wall-clock window and publish the
+ * result atomically. Unlike an exponential moving average, this reflects the
+ * true sustained frame rate: a one-second slowdown shows the real low value,
+ * and recovery is visible only after a full second at the higher rate.
+ */
+static void update_android_fps(void)
+{
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (g_fps_window_start_ns == 0) {
+        g_fps_window_start_ns = now;
+    }
+    g_fps_frame_count++;
+    int64_t elapsed = now - g_fps_window_start_ns;
+    if (elapsed >= 1000000000LL) {
+        /* Divide with rounding to nearest integer FPS */
+        int fps_val = (int)((g_fps_frame_count * 1000000000LL + elapsed / 2) / elapsed);
+        qatomic_set(&g_android_fps_published, fps_val);
+        g_fps_frame_count = 0;
+        g_fps_window_start_ns = now;
+    }
 }
 #endif
 
@@ -1553,9 +1578,6 @@ static void update_fps(void)
     if (fabs(avg-ms) > 0.25*avg) avg = ms;
     else avg = avg*(1.0-r)+ms*r;
     fps = 1000.0/avg;
-#ifdef __ANDROID__
-    qatomic_set(&g_android_fps_published, (int)fps);
-#endif
 }
 
 void sdl2_gl_refresh(DisplayChangeListener *dcl)
@@ -1606,6 +1628,9 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
 #endif
     update_fps();
     g_android_frame_counter++;
+#ifdef __ANDROID__
+    update_android_fps();
+#endif
 
     /* XXX: Note that this bypasses the usual VGA path in order to quickly
      * get the surface. This is simple and fast, at the cost of accuracy.
